@@ -1,0 +1,11 @@
+prefix=/workspaces/poem/venv
+exec_prefix=/workspaces/poem/venv
+libdir=/workspaces/poem/venv/lib
+includedir=/workspaces/poem/venv/include
+
+Name: uuid
+Description: Universally unique id library
+Version: 2.32.1
+Requires:
+Cflags: -I${includedir}/uuid
+Libs: -L${libdir} -luuid
