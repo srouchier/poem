@@ -1,26 +1,14 @@
-from dash import Dash, dcc, html
-from tabs.tab0_home import home_tab_content
-from tabs.tab1_data import data_tab_content
-from tabs.tab2_model import model_tab_content
-from tabs.tab3_train import train_tab_content
-from tabs.tab4_post import post_tab_content
+import streamlit as st
+from utils import show_dataset_sidebar_note
 
-app = Dash(__name__)
+pg = st.navigation([st.Page("0_index.py", title="Welcome", icon="🏠"),
+                    st.Page("1_linreg.py", title="Linear regression", icon="📏"),
+                    st.Page("2_changepoint.py", title="Change-point", icon="✍️"),
+                    st.Page("3_timeseries.py", title="Time series", icon="🕒")])
 
-app.layout = html.Div([
-    dcc.Tabs([
-        dcc.Tab(label='Home', children=home_tab_content),
-        dcc.Tab(label='Data', children=data_tab_content),
-        dcc.Tab(label='Modelling', children=model_tab_content),
-        dcc.Tab(label='Training', children=train_tab_content),
-        dcc.Tab(label='Posterior', children=post_tab_content)
-    ])
-])
+# show_dataset_sidebar_note()
 
-if __name__ == '__main__':
-    # type this in terminal
-    # conda activate poem
-    # HOST=127.0.0.1 (ou 0.0.0.0)
-    # python app.py
-    # dash tourne alors sur l'adresse affichée
-    app.run(debug=True)
+with st.sidebar:
+    st.write("I will probably use this sidebar to list trained models so the user can load and compare them. Models trained in this session, or loaded from a previous session.")
+
+pg.run()

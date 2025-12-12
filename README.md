@@ -2,6 +2,10 @@
 
 Probabilistic building energy modelling
 
-Initialisation de la librairie le 9 mars 2025. Pour l'instant c'est tout vide.
+POEM is a high-level Python interface for Stan, targeted at the prediction of building energy use.
 
-https://mybinder.org/v2/gh/locie/poem/main
+It includes pre-compiled Stan models, so that user do not need to learn Stan, and utility functions to facilitate the process of building, training and checking models.
+
+The target of this package is to make Bayesian inference more accessible to building energy engineers. In general, the documentation of probabilistic modelling libraries is not made to be comprehensible by non statisticians: we try to fill this gap.
+
+Soon available as a Streamlit app
