@@ -1,4 +1,5 @@
 import streamlit as st
+import cmdstanpy
 from utils import show_dataset_sidebar_note
 
 pg = st.navigation([st.Page("0_index.py", title="Welcome", icon="🏠"),
