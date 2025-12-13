@@ -4,7 +4,6 @@ channels:
 dependencies:
   - matplotlib
   - streamlit
-  - cmdstan
   - cmdstanpy
   - arviz
   - pip

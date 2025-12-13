@@ -1,5 +1,0 @@
-matplotlib
-streamlit
-cmdstan
-cmdstanpy
-arviz
