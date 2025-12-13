@@ -1,0 +1,4 @@
+matplotlib
+streamlit
+cmdstanpy
+arviz
