@@ -19,11 +19,13 @@ st.set_page_config(
 st.markdown("""
 # Linear regression
 
-This model is explained on [this page](https://buildingenergygeeks.com/linearregression.html).
+This is a first draft of a web app for probabilistic modelling using PyMC. In the future, this app will let users select a model among a few options for building energy modelling.
+
+For now, only ordinary linear regression is available here. I made tutorials for Bayesian regression [with PyMC](https://buildingenergygeeks.com/linearregression.html) or [with Stan](https://buildingenergygeeks.com/linearregression_stan.html).
 
 ## Training data
 
-Load a dataset for model training and display a quick insight of its variables.
+Start by loading a training dataset here.
 """)
 
 c01, c02 = st.columns(2)
@@ -113,7 +115,8 @@ st.markdown("""
 ## Linear regression model
 
 This model takes one variable as output (for example energy consumption),
-and one or several variables as input. You may select them below.
+and one or several variables as input. You may select any of the variables from the column names of the datafile you provided, then click on the Train button.
+
 In a future version of this app, this section will allow prior selection.
 """)
 
