@@ -1,5 +1,7 @@
 import streamlit as st
 import pandas as pd
+import requests
+import io
 
 def load_data_to_session(uploaded_file):
     """Read uploaded file and store dataframe and filename in st.session_state."""
@@ -11,9 +13,7 @@ def load_data_to_session(uploaded_file):
     else:
         st.warning(f"File type not accepted")
 
-    st.session_state["df"] = df
-    st.session_state["uploaded_name"] = uploaded_file.name
-    return df
+    return df, name
 
 def show_dataset_sidebar_note():
     """Show a small note in the sidebar when a dataset was uploaded."""

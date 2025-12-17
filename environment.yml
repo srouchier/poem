@@ -3,9 +3,6 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - arviz=0.21.0
-  - cmdstan=2.36.0
-  - matplotlib=3.10.0
-  - pip:
-      - cmdstanpy==1.3.0
-      - streamlit==1.52.1
+  - arviz
+  - pymc
+  - matplotlib

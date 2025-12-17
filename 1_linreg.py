@@ -3,8 +3,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+import io
+
 import arviz as az
-from cmdstanpy import CmdStanModel
+import pymc as pm
 
 from utils import load_data_to_session
 
@@ -17,11 +19,11 @@ st.set_page_config(
 st.markdown("""
 # Linear regression
 
-This model is explained on [this page](https://buildingenergygeeks.com/linearregression_stan.html).
+This model is explained on [this page](https://buildingenergygeeks.com/linearregression.html).
 
-## Data selection
+## Training data
 
-Load a dataset for model training.
+Load a dataset for model training and display a quick insight of its variables.
 """)
 
 c01, c02 = st.columns(2)
@@ -30,11 +32,13 @@ with c01:
     st.subheader("Data file")
 
     # --- Upload widget + loader ----------------------------------------------
-    uploaded = st.file_uploader("Upload a CSV or Excel file", type=["csv", "xls", "xlsx"])
+    uploaded = st.file_uploader("Upload a CSV or Excel file", type=["csv", "xls", "xlsx"], key="linreg_train")
     if uploaded is not None:
         try:
-            df = load_data_to_session(uploaded)
+            df, uploaded_name = load_data_to_session(uploaded)
             st.success(f"Loaded `{uploaded.name}` — {len(df):,} rows")
+            st.session_state["df"] = df
+            st.session_state["df_name"] = uploaded_name
             st.write("Displaying the first 5 lines of the dataset")
             st.dataframe(df.head())
         except Exception as e:
@@ -110,6 +114,7 @@ st.markdown("""
 
 This model takes one variable as output (for example energy consumption),
 and one or several variables as input. You may select them below.
+In a future version of this app, this section will allow prior selection.
 """)
 
 st.latex(r'''y_i = \alpha + \beta_1 x_{i1} + ... + \beta_k x_{ik} + \varepsilon''')
@@ -141,38 +146,62 @@ with c2:
         prev_y = st.session_state.get("y_col")
         default_index = y_options.index(prev_y) if (prev_y in y_options) else 0
         y_choice = st.radio("Select one variable", options=y_options, index=default_index, key="select_y_radio")
-        st.session_state["y_col"] = y_choice
+        st.session_state["Y_col"] = y_choice
         st.session_state["Y"] = df[y_choice].copy()
+
+# Prior specification: for now it's fixed
+
+a_mu_prior = st.session_state["Y"].mean()
+a_sigma_prior = st.session_state["Y"].std()
+b_mu_prior = np.zeros(st.session_state["X"].shape[1])
+b_sigma_prior = st.session_state["Y"].mean() / st.session_state["X"].mean(axis=0)
 
 # ------------------- TRAINING -------------------------
 
-training_done = False
 
 # Show train button only when at least one input column was selected
 if ("Y" in st.session_state) and st.session_state.get("X_cols"):
 
     xcols = st.session_state["X_cols"]
-
     if st.button(f"Train model with {len(xcols)} inputs: {', '.join(xcols)}"):
 
         try:
-            # training logic goes here
-            model = CmdStanModel(stan_file='models_stan/linearregression.stan')
 
-            model_data = {
-                "N": len(df),
-                "K": len(selected_cols),
-                "x": st.session_state["X"].values,
-                "y": st.session_state["Y"].values,
-            }
+            with st.spinner('🔄 Sampling... This may take several minutes.'):
 
-            fit = model.sample(data=model_data)
+                # If there was a previous training, remove its results
+                for k in ("summary_df", "cached_trace_fig", "idata", "idata_2"):
+                    st.session_state.pop(k, None)
+
+                model1 = pm.Model()
+
+                with model1:
+
+                    pred = pm.Data("pred", st.session_state["X"])
+
+                    # Priors for unknown model parameters
+                    alpha = pm.Normal("alpha", mu = a_mu_prior, sigma = a_sigma_prior)
+                    beta = pm.Normal("beta", mu = b_mu_prior, sigma = b_sigma_prior, shape = st.session_state["X"].shape[1])
+                    sigma = pm.HalfNormal("sigma", sigma=a_sigma_prior)
+
+                    mu = alpha + pm.math.dot(pred, beta)
+                    
+                    # Likelihood (sampling distribution) of observations
+                    Y_obs = pm.Normal("Y_obs", mu = mu, sigma = sigma, observed=st.session_state["Y"])
+
+                    # Training
+                    idata = pm.sample(chains=4, idata_kwargs={"log_likelihood": True})
+
+                    # Posterior
+                    pm.sample_posterior_predictive(idata, extend_inferencedata=True)
+                
 
             st.success("Model training complete")
 
-            # save fit in session state for later use
+            # Save idata in session state for later use
             training_done = True
-            st.session_state["fit"] = fit
+            st.session_state["idata"] = idata
+            st.session_state['model1'] = model1
 
         except Exception as e:
             st.error({e})
@@ -187,8 +216,21 @@ st.markdown("---")
 # ------------------- RESULTS -------------------------
 
 # Only proceed if training has succeeded
-if not training_done:
+if "idata" not in st.session_state:
     st.stop()
+else:
+    idata = st.session_state["idata"]
+
+# Posterior predictive
+y_hat = idata.posterior_predictive["Y_obs"]
+# mean over chain and draw -> gives a DataArray indexed by observation
+y_hat_mean = y_hat.mean(("chain", "draw"))
+# Mean residuals
+resid = st.session_state["Y"] - y_hat_mean
+ssres = np.sum(resid**2)
+sstot = np.sum( (st.session_state["Y"]- st.session_state["Y"].mean())**2 )
+R2 = 1 - ssres / sstot
+CVRMSE = np.sqrt( ssres / len(st.session_state["Y"]) ) / st.session_state["Y"].mean()
 
 st.markdown("## Results")
 
@@ -197,81 +239,132 @@ c21, c22 = st.columns(2)
 # Show convergence diagnostics
 with c21:
 
-    st.markdown("**MCMC convergence diagnostics**")
-    st.write(fit.diagnose())
-
-    # Build a parameter list excluding diagnostics and predictions
-    exclude_exact = {"lp__"}
-    exclude_prefixes = ("log_lik", "y_hat")
-    params = [p for p in fit.column_names if p not in exclude_exact and not any(p.startswith(pref) for pref in exclude_prefixes)]
-
     # Show summary table
     st.markdown("**Posterior summary**")
-    summary_df = fit.summary(percentiles=(5, 50, 95))
-    summary_df = summary_df.loc[[r for r in summary_df.index if r in params]]
-    st.dataframe(summary_df)
+    if "summary_df" not in st.session_state:
+        st.session_state.summary_df = az.summary(idata)
+    st.dataframe(st.session_state.summary_df)
 
-# Save results
-res_pd = fit.draws_pd()
-res_xr = fit.draws_xr()
+    st.markdown("**Some statistics**")
+    st.write("R2: ", R2)
+    st.write("CV(RMSE): ", CVRMSE)
 
-idata = az.from_cmdstanpy(
-    posterior = fit,
-    posterior_predictive="y_hat",
-    observed_data={"y": st.session_state["Y"]},
-    constant_data={"x": st.session_state["X"]},
-    log_likelihood="log_lik",
-)
+    # az.plot_autocorr(resid.values)
+    # fig = plt.gcf()
+    # st.pyplot(fig, clear_figure = True, width=400)
 
 with c22:
     
     # Show trace plot
     st.markdown("**Trace plot**")
-    az.plot_trace(idata)  # choose vars you want
-    fig = plt.gcf()
+
+    if "cached_trace_fig" in st.session_state:
+        st.image(st.session_state["cached_trace_fig"])
+    else:
+        az.plot_trace(idata)
+        fig = plt.gcf()
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+        buf.seek(0)
+        st.session_state["cached_trace_fig"] = buf.getvalue()
+        st.image(st.session_state["cached_trace_fig"])
+
+        #st.pyplot(fig_trace, clear_figure = True)
+    #plt.close(fig)
+
+# ------------------- PREDICTIONS -------------------------
+
+
+st.markdown("## Predictions")
+
+c31, c32 = st.columns(2)
+
+with c31:
+
+    st.subheader("In-sample posterior prediction")
+
+    st.write("Comparison of the model's output with the training data. Most data points should belong in the high density intervals.")
+
+    x_plot_choice = st.selectbox("Select an X axis", cols, index=0)
+    x_plot = df[x_plot_choice]
+    y_plot = df[y_choice]
+
+    fig, ax = plt.subplots()
+    ax.scatter(x_plot, y_plot, alpha=0.6, label='data')
+    ax.scatter(x_plot, y_hat_mean, c="C1", alpha=0.6, label='posterior mean')
+    az.plot_hdi(x_plot, y_hat, ax=ax)
+    ax.set_xlabel(x_plot_choice) #, fontsize=10)
+    ax.set_ylabel(y_choice) #, fontsize=10)
+    # ax.tick_params(axis='both', labelsize=10)
+    ax.legend()#fontsize=10)
     st.pyplot(fig)
     plt.close(fig)
 
 
-st.markdown("## Posterior predictive plots")
+with c32:
 
-y_post = idata.posterior_predictive["y_hat"]
-# mean over chain and draw -> gives a DataArray indexed by observation
-y_post_mean = y_post.mean(("chain", "draw"))
+    st.subheader("Out of sample prediction")
 
-# Prepare observed y values
-obs_name = st.session_state.get("y_col", "y")
-y_obs = st.session_state.get("Y")
-if y_obs is None:
-    y_obs = df[obs_name]
+    # --- Upload widget + loader ----------------------------------------------
+    uploaded_post = st.file_uploader("Upload a CSV or Excel file", type=["csv", "xls", "xlsx"], key="linreg_test")
+    if uploaded_post is not None:
+        try:
+            df_post, uploaded_name = load_data_to_session(uploaded_post)
+            st.success(f"Loaded `{uploaded_post.name}` — {len(df):,} rows")
+            st.session_state["df_post"] = df_post
+            st.session_state["df_post_name"] = uploaded_name
+        except Exception as e:
+            st.error(f"Failed to read file: {e}")
+    elif "df_post" in st.session_state:
+        df_post = st.session_state["df_post"]
+        st.info("Using previously uploaded dataset")
+    else:
+        st.stop()
 
-# Get selected input variables (X)
-input_vars = st.session_state.get("X_cols", [])
-if not input_vars:
-    st.info("No input variables available for posterior predictive plots.")
-else:
+    try:
 
-    ncols = len(input_vars)
-    fig_width = 5 * max(1, ncols)   # inches per column
-    fig_height = 4                  # inches
-    fig, axes = plt.subplots(1, ncols, figsize=(fig_width, fig_height), squeeze=False, dpi=150)
+        st.session_state["X_post"] = df_post[selected_cols].copy()
+        st.session_state["Y_post"] = df_post[y_choice].copy()
 
-    for i, col in enumerate(input_vars):
-        ax = axes[0, i]
+        if "idata_2" in st.session_state:
+            idata_2 = st.session_state["idata_2"]
+        else:
 
-        x = df[col]
-        # scatter observed data
-        ax.scatter(x, y_obs, alpha=0.6, label='data')
-        # scatter posterior mean (align by observation index)
-        ax.scatter(x, y_post_mean, c="C1", alpha=0.6, label='posterior mean')
-        # plot HDI along x (az.plot_hdi accepts x and y_draws)
-        az.plot_hdi(x, y_post, ax=ax)
+            model1 = st.session_state['model1']
 
-        ax.set_xlabel(col, fontsize=10)
-        ax.set_ylabel(obs_name, fontsize=10)
-        ax.tick_params(axis='both', labelsize=10)
-        ax.legend(fontsize=10)
+            with model1:
+                # update values of predictors:
+                pm.set_data({"pred": st.session_state["X_post"]})
+                # use the updated values and predict outcomes and probabilities:
+                idata_2 = pm.sample_posterior_predictive(
+                    idata,
+                    var_names=["Y_obs"],
+                    return_inferencedata=True,
+                    predictions=True,
+                    extend_inferencedata=False
+                )
+            st.session_state["idata_2"] = idata_2
 
-    plt.tight_layout()
-    st.pyplot(fig, width="content")
-    plt.close(fig)
+        # Posterior predictive
+        y_post = idata_2.predictions["Y_obs"]
+        # mean over chain and draw -> gives a DataArray indexed by observation
+        y_post_mean = y_post.mean(("chain", "draw"))
+
+        x_plot = df_post[x_plot_choice]
+        y_plot = df_post[y_choice]
+        fig, ax = plt.subplots()
+        ax.scatter(x_plot, y_plot, alpha=0.6, label='data')
+        ax.scatter(x_plot, y_post_mean, c="C1", alpha=0.6, label='posterior mean')
+        az.plot_hdi(x_plot, y_post, ax=ax)
+        ax.set_xlabel(x_plot_choice) #, fontsize=10)
+        ax.set_ylabel(y_choice) #, fontsize=10)
+        # ax.tick_params(axis='both', labelsize=10)
+        ax.legend()#fontsize=10)
+        st.pyplot(fig)
+        plt.close(fig)
+
+    except Exception as e:
+        st.warning("The prediction dataset must have the same column names as the training dataset.")
+        st.error(f"Could not create plot: {e}")
+
