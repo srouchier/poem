@@ -1,8 +1,0 @@
-name: poem
-channels:
-  - conda-forge
-  - defaults
-dependencies:
-  - arviz
-  - pymc
-  - matplotlib
